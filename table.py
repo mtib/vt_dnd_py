@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 import tkinter as tk
+from tkinter import ttk
 import math
 import threading
 from PIL import Image, ImageTk
 import sys
 root = tk.Tk()
+root.style = ttk.Style()
+if "clam" in root.style.theme_names():
+    root.style.theme_use("clam")
+
 
 MOB_MODE = 1
 PLAY_MODE = 2
@@ -305,6 +310,6 @@ if __name__ == '__main__':
                 sys.argv.append(fname)
                 break
             c += 1
-            if c > 3:
+            if c > 1: # could resist
                 sys.exit(1)
     main()
