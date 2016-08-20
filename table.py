@@ -38,6 +38,10 @@ BUTTON_BG = "#333"
 BUTTON_FG = "#FFF"
 DEFAULT_VIEW_DIST = 400 #px
 
+SHADOW_FACTOR = 4
+SHADOW_STEP_TIMES = 2 # *360 Degree
+DARKNESS_OPACITY = 0x0F #0x1F
+
 INIT_DIR = "/home/mtib/Pictures/DND"
 
 class Playfield(object):
@@ -243,6 +247,13 @@ class Playfield(object):
             n = int(d * float(bw))
             pbg = pbg.resize((n, h), Image.ANTIALIAS)
         pbg.save("/tmp/resized_dnd.png")
+        self.small_bg = pbg.resize(
+            (
+                int(float(w)/SHADOW_FACTOR),
+                int(float(h)/SHADOW_FACTOR)
+            ),
+            Image.ANTIALIAS
+        )
         self.full_bg = ImageTk.PhotoImage(file="/tmp/resized_dnd.png")
         self.img = self.canv.create_image(0,0,anchor="nw",image=self.full_bg)
         self.canv.itemconfig(self.img, anchor="center")
@@ -268,25 +279,41 @@ class Playfield(object):
 
     def alpha_mask(self):
         img = Image.open("/tmp/resized_dnd.png")
-        factor = 4
-        view_dist = self.view_dist / factor
-        (sx, sy) = img.size
-        tx = int(sx/factor)
-        ty = int(sy/factor)
-        mask = Image.new("L", (tx,ty), 0x3F)
-        mids = [((x2+x1)/(2*factor), (y2+y1)/(2*factor)) for (x1,y1,x2,y2) in [self.canv.coords(token) for token in self.tokens]]
+        pix = img.load() # this might be merged with the line above
+        # also static in runtime... actually no need to do this here
+        view_dist = int(self.view_dist / SHADOW_FACTOR)
+        (rx, ry) = img.size
+        (tx, ty) = self.small_bg.size
+        mask = Image.new("L", (tx,ty), DARKNESS_OPACITY)
         mask.load()
-        for y in range(ty):
-            for x in range(tx):
-                for mid in mids:
-                    dist = math.sqrt((x-mid[0])**2 + (y-mid[1])**2)
-                    if dist < view_dist:
-                        mask.putpixel((x,y),255)
+        mids = [
+            ((x2+x1)/2/SHADOW_FACTOR, (y2+y1)/2/SHADOW_FACTOR)
+            for (x1,y1,x2,y2) in [
+                self.canv.coords(token) for token in self.tokens
+            ]
+        ]
+        sin_deg = lambda i: math.sin(math.radians(i))
+        cos_deg = lambda i: math.cos(math.radians(i))
+        clamp = lambda i, l, h: int(max(max(l,i), min(i,h)))
+        lower_bound = int((TOKEN_SIZE/2+2)/SHADOW_FACTOR)
+        for mid in mids:
+            mx, my = mid
+            for phi in range(int(360*SHADOW_STEP_TIMES)):
+                normx = sin_deg(phi/SHADOW_STEP_TIMES)
+                normy = cos_deg(phi/SHADOW_STEP_TIMES)
+                for vlen in range(0, view_dist):
+                    x = int((vlen * normx + mx) * SHADOW_FACTOR)
+                    y = int((vlen * normy + my) * SHADOW_FACTOR)
+                    if y < 0 or y >= ry or x < 0 or x >= rx:
                         break
-        img.putalpha(mask.resize(img.size))
+                    (r, g, b) = pix[x,y]
+                    if (r+g+b) < 45:
+                        break
+                    mask.putpixel((clamp(x/SHADOW_FACTOR,0,tx-1),clamp(y/SHADOW_FACTOR,0,ty-1)), int((1-vlen/view_dist)*255))
+        mask = mask.resize(img.size, Image.ANTIALIAS)
+        img.putalpha(mask)
         self.bg = ImageTk.PhotoImage(img)
         self.canv.itemconfig(self.img, image=self.bg)
-
 
 
 
@@ -305,7 +332,14 @@ if __name__ == '__main__':
         import tkinter.filedialog as fd
         c = 0
         while True:
-            fname = fd.askopenfilename(title="Hintergrund", initialdir=INIT_DIR, filetypes=(("Images","*.jpg *.png *.gif *.bmp *.jpeg"),("all files","*.*")))
+            fname = fd.askopenfilename(
+                title       = "Hintergrund",
+                initialdir  = INIT_DIR,
+                filetypes   = (
+                    ("Images",      "*.jpg *.png *.gif *.bmp *.jpeg"),
+                    ("all files",   "*.*")
+                )
+            )
             if fname:
                 sys.argv.append(fname)
                 break
