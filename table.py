@@ -38,9 +38,10 @@ BUTTON_BG = "#333"
 BUTTON_FG = "#FFF"
 DEFAULT_VIEW_DIST = 400 #px
 
-SHADOW_FACTOR = 4
-SHADOW_STEP_TIMES = 2 # *360 Degree
-DARKNESS_OPACITY = 0x0F #0x1F
+ENABLE_SHADOWS = False
+SHADOW_FACTOR = 8
+SHADOW_STEP_TIMES = 1 # *360 Degree
+DARKNESS_OPACITY = 0x4F
 
 INIT_DIR = "/home/mtib/Pictures/DND"
 
@@ -54,6 +55,7 @@ class Playfield(object):
         self.tokens = []
         self.last_color = "#F0F"
         self.bigger = 0
+        self.shadows = ENABLE_SHADOWS
         pad=3
 
         master.attributes("-fullscreen", True)
@@ -85,10 +87,13 @@ class Playfield(object):
         self.last_token_sm.pack(side="left")
         self.last_token_bigger = tk.Button(master, text="Einer+", command=self.do_last_token_bigger, bg=BUTTON_BG, fg=BUTTON_FG)
         self.last_token_bigger.pack(side="left")
-        self.more_fog_of_war_btn = tk.Button(master, text="Sicht-", command=self.more_fog_of_war, bg=BUTTON_BG, fg=BUTTON_FG)
-        self.more_fog_of_war_btn.pack(side="left")
-        self.less_fog_of_war_btn = tk.Button(master, text="Sicht+", command=self.less_fog_of_war, bg=BUTTON_BG, fg=BUTTON_FG)
-        self.less_fog_of_war_btn.pack(side="left")
+        if self.shadows:
+            self.more_fog_of_war_btn = tk.Button(master, text="Schatten-", command=self.more_fog_of_war, bg=BUTTON_BG, fg=BUTTON_FG)
+            self.more_fog_of_war_btn.pack(side="left")
+            self.less_fog_of_war_btn = tk.Button(master, text="Schatten+", command=self.less_fog_of_war, bg=BUTTON_BG, fg=BUTTON_FG)
+            self.less_fog_of_war_btn.pack(side="left")
+            self.toggle_sicht_btn = tk.Button(master, text="Schatten an/aus", command=self.toggle_sicht, bg=BUTTON_BG, fg=BUTTON_FG)
+            self.toggle_sicht_btn.pack(side="left")
         self.destroy_button = tk.Button(master, text="Beenden", command=self.master.destroy, bg=BUTTON_BG, fg=BUTTON_FG)
         self.destroy_button.pack(side="right")
         self.groesse_reset_btn = tk.Button(master, text="Größe Reset", command=self.groesse_reset, bg=BUTTON_BG, fg=BUTTON_FG)
@@ -114,6 +119,21 @@ class Playfield(object):
             except:
                 pass
 
+    def toggle_sicht(self):
+        self.shadows = not self.shadows
+        if not self.shadows:
+            self.more_fog_of_war_btn.config(state=tk.DISABLED)
+            self.less_fog_of_war_btn.config(state=tk.DISABLED)
+            mask = Image.new("L", self.full_bg.size, 0xFF)
+            self.full_bg.putalpha(mask)
+            self.bg = ImageTk.PhotoImage(self.full_bg)
+            self.canv.itemconfig(self.img, image=self.bg)
+        else:
+            self.more_fog_of_war_btn.config(state=tk.NORMAL)
+            self.less_fog_of_war_btn.config(state=tk.NORMAL)
+            self.new_shadow_thread().start()
+
+
     def kill(self,event):
         self.master.destroy()
 
@@ -122,14 +142,14 @@ class Playfield(object):
 
     def more_fog_of_war(self):
         self.view_dist -= 100
-        rload = threading.Thread(target=Playfield.alpha_mask, args=(self,))
-        rload.start() #pseude multi thread
+        self.new_shadow_thread().start()
 
     def less_fog_of_war(self):
         self.view_dist += 100
-        rload = threading.Thread(target=Playfield.alpha_mask, args=(self,))
-        rload.start() #pseude multi thread
+        self.new_shadow_thread().start()
 
+    def new_shadow_thread(self):
+        return threading.Thread(target=Playfield.alpha_mask, args=(self,))
 
     def do_last_token_smaller(self):
         x1, y1, x2, y2 = self.canv.coords(self.clicked)
@@ -236,7 +256,7 @@ class Playfield(object):
 
     def configured(self, data):
         w, h = data.width, data.height
-        pbg = Image.open(sys.argv[1])
+        pbg = Image.open(sys.argv[-1])
         bw ,bh = pbg.size[0], pbg.size[1]
         if float(bw)/float(w) > float(bh)/float(h):
             d = float(w)/float(bw)
@@ -247,6 +267,7 @@ class Playfield(object):
             n = int(d * float(bw))
             pbg = pbg.resize((n, h), Image.ANTIALIAS)
         pbg.save("/tmp/resized_dnd.png")
+        self.full_bg = pbg.copy()
         self.small_bg = pbg.resize(
             (
                 int(float(w)/SHADOW_FACTOR),
@@ -254,8 +275,8 @@ class Playfield(object):
             ),
             Image.ANTIALIAS
         )
-        self.full_bg = ImageTk.PhotoImage(file="/tmp/resized_dnd.png")
-        self.img = self.canv.create_image(0,0,anchor="nw",image=self.full_bg)
+        self.bg = ImageTk.PhotoImage(self.full_bg)
+        self.img = self.canv.create_image(0,0,anchor="nw",image=self.bg)
         self.canv.itemconfig(self.img, anchor="center")
         self.canv.move(self.img, w/2,h/2)
 
@@ -269,8 +290,8 @@ class Playfield(object):
 
 
     def set_token(self, event):
-        rload = threading.Thread(target=Playfield.alpha_mask, args=(self,))
-        rload.start() #pseude multi thread
+        if self.shadows:
+            self.new_shadow_thread().start()
         if self.last_color != "F0F":
             self.canv.itemconfig(self.selected, fill=self.last_color)
             self.last_color = "F0F"
@@ -278,11 +299,10 @@ class Playfield(object):
         # reload alpha mast
 
     def alpha_mask(self):
-        img = Image.open("/tmp/resized_dnd.png")
+        img = self.small_bg.copy()
         pix = img.load() # this might be merged with the line above
         # also static in runtime... actually no need to do this here
         view_dist = int(self.view_dist / SHADOW_FACTOR)
-        (rx, ry) = img.size
         (tx, ty) = self.small_bg.size
         mask = Image.new("L", (tx,ty), DARKNESS_OPACITY)
         mask.load()
@@ -294,25 +314,41 @@ class Playfield(object):
         ]
         sin_deg = lambda i: math.sin(math.radians(i))
         cos_deg = lambda i: math.cos(math.radians(i))
-        clamp = lambda i, l, h: int(max(max(l,i), min(i,h)))
+        clamp = lambda i, l, h: int(min(max(l,i), min(i,h)))
         lower_bound = int((TOKEN_SIZE/2+2)/SHADOW_FACTOR)
+        alpha_lookup = []
+        for v in range(view_dist):
+            alpha_lookup.append(max(int((1-v/view_dist)*255), DARKNESS_OPACITY))
+        norm_lookup = []
+        for phi in range(int(360*SHADOW_STEP_TIMES)):
+            norm_lookup.append(
+                (
+                    sin_deg(phi/SHADOW_STEP_TIMES),
+                    cos_deg(phi/SHADOW_STEP_TIMES)
+                )
+            )
+        mix = mask.load()
         for mid in mids:
             mx, my = mid
-            for phi in range(int(360*SHADOW_STEP_TIMES)):
-                normx = sin_deg(phi/SHADOW_STEP_TIMES)
-                normy = cos_deg(phi/SHADOW_STEP_TIMES)
-                for vlen in range(0, view_dist):
-                    x = int((vlen * normx + mx) * SHADOW_FACTOR)
-                    y = int((vlen * normy + my) * SHADOW_FACTOR)
-                    if y < 0 or y >= ry or x < 0 or x >= rx:
+            for (normx, normy) in norm_lookup:
+                for vlen in range(view_dist):
+                    x = int(vlen * normx + mx)
+                    y = int(vlen * normy + my)
+                    if y < 0 or y >= ty or x < 0 or x >= tx:
                         break
                     (r, g, b) = pix[x,y]
-                    if (r+g+b) < 45:
+                    if (r+g+b) < 45: #~15 = 3*15
                         break
-                    mask.putpixel((clamp(x/SHADOW_FACTOR,0,tx-1),clamp(y/SHADOW_FACTOR,0,ty-1)), int((1-vlen/view_dist)*255))
-        mask = mask.resize(img.size, Image.ANTIALIAS)
-        img.putalpha(mask)
-        self.bg = ImageTk.PhotoImage(img)
+                    alpha = alpha_lookup[vlen]
+                    calpha = mix[x,y]
+                    if calpha == DARKNESS_OPACITY:
+                        mix[x,y] = alpha
+                    else:
+                        mix[x,y] =  int(math.pow(alpha**2+calpha**2,0.5))
+
+        mask = mask.resize(self.full_bg.size, Image.ANTIALIAS)
+        self.full_bg.putalpha(mask)
+        self.bg = ImageTk.PhotoImage(self.full_bg)
         self.canv.itemconfig(self.img, image=self.bg)
 
 
@@ -328,7 +364,12 @@ def add_player():
     pass
 
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
+    has_filename = False
+    for a in sys.argv[1:]:
+        if a[0] != "-":
+            has_filename = True
+            break
+    if len(sys.argv) < 2 or not has_filename:
         import tkinter.filedialog as fd
         c = 0
         while True:
@@ -346,4 +387,8 @@ if __name__ == '__main__':
             c += 1
             if c > 1: # could resist
                 sys.exit(1)
+    if "-s" in sys.argv:
+        ENABLE_SHADOWS = True
+    elif "-S" in sys.argv:
+        ENABLE_SHADOWS = False
     main()
