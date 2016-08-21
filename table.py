@@ -43,6 +43,7 @@ SHADOW_FACTOR = 8
 SHADOW_STEP_TIMES = 1 # *360 Degree
 DARKNESS_OPACITY = 0x4F
 
+# TODO use sys.user...
 INIT_DIR = "/home/mtib/Pictures/DND"
 
 class Playfield(object):
